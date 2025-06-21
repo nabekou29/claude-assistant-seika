@@ -26,6 +26,7 @@ export interface Config {
     // その他
     tempDir?: string;
     playCommand?: string;
+    maxTextLength?: number;
   };
   sessionId?: string;
   projectDir?: string;
@@ -49,6 +50,7 @@ export function loadConfig(): Config {
       intonation: parseFloat(process.env.SEIKA_INTONATION || '1.0'),
       tempDir: process.env.SEIKA_TEMP_DIR,
       playCommand: process.env.SEIKA_PLAY_COMMAND,
+      maxTextLength: process.env.SEIKA_MAX_TEXT_LENGTH ? parseInt(process.env.SEIKA_MAX_TEXT_LENGTH) : undefined,
     },
     sessionId: process.env.CLAUDE_SESSION_ID,
     projectDir: process.env.CLAUDE_PROJECT_DIR || process.cwd(),

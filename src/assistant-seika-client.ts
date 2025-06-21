@@ -22,6 +22,7 @@ export interface AssistantSeikaConfig {
   };
   tempDir?: string;
   playCommand?: string; // カスタム再生コマンド
+  maxTextLength?: number; // 一度に読み上げる最大文字数（デフォルト: 200）
 }
 
 export interface AvatorInfo {
@@ -47,21 +48,82 @@ export class AssistantSeikaClient {
 
   async speak(text: string): Promise<void> {
     try {
-      // 音声ファイルを生成
-      const audioBuffer = await this.generateSpeech(text);
+      // 長い文章は分割して読み上げ
+      const chunks = this.splitText(text);
       
-      // 一時ファイルに保存
-      const tempFile = path.join(this.tempDir, `speech_${Date.now()}.wav`);
-      fs.writeFileSync(tempFile, audioBuffer);
-      
-      // 音声を再生
-      await this.playAudio(tempFile);
-      
-      // 一時ファイルを削除
-      fs.unlinkSync(tempFile);
+      for (const chunk of chunks) {
+        // 音声ファイルを生成
+        const audioBuffer = await this.generateSpeech(chunk);
+        
+        // 一時ファイルに保存
+        const tempFile = path.join(this.tempDir, `speech_${Date.now()}.wav`);
+        fs.writeFileSync(tempFile, audioBuffer);
+        
+        // 音声を再生
+        await this.playAudio(tempFile);
+        
+        // 一時ファイルを削除
+        fs.unlinkSync(tempFile);
+        
+        // 次のチャンクまで少し間を空ける
+        if (chunks.length > 1 && chunk !== chunks[chunks.length - 1]) {
+          await new Promise(resolve => setTimeout(resolve, 300));
+        }
+      }
     } catch (error) {
       throw new Error(`Failed to speak: ${error}`);
     }
+  }
+
+  private splitText(text: string): string[] {
+    const maxLength = this.config.maxTextLength || 200;
+    
+    // 短い文章はそのまま返す
+    if (text.length <= maxLength) {
+      return [text];
+    }
+    
+    const chunks: string[] = [];
+    let currentChunk = '';
+    
+    // 句読点で優先的に分割
+    const sentences = text.split(/(?<=[。！？\n])/);
+    
+    for (const sentence of sentences) {
+      if (currentChunk.length + sentence.length <= maxLength) {
+        currentChunk += sentence;
+      } else {
+        if (currentChunk) {
+          chunks.push(currentChunk.trim());
+        }
+        
+        // 一文が長すぎる場合は、読点でさらに分割
+        if (sentence.length > maxLength) {
+          const subSentences = sentence.split(/(?<=[、,])/);
+          currentChunk = '';
+          
+          for (const subSentence of subSentences) {
+            if (currentChunk.length + subSentence.length <= maxLength) {
+              currentChunk += subSentence;
+            } else {
+              if (currentChunk) {
+                chunks.push(currentChunk.trim());
+              }
+              currentChunk = subSentence;
+            }
+          }
+        } else {
+          currentChunk = sentence;
+        }
+      }
+    }
+    
+    // 最後のチャンクを追加
+    if (currentChunk) {
+      chunks.push(currentChunk.trim());
+    }
+    
+    return chunks;
   }
 
   async generateSpeech(text: string): Promise<Buffer> {

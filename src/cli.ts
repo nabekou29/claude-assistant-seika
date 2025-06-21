@@ -85,7 +85,8 @@ program
       },
       emotions: config.tts.emotions,
       tempDir: config.tts.tempDir,
-      playCommand: config.tts.playCommand
+      playCommand: config.tts.playCommand,
+      maxTextLength: config.tts.maxTextLength
     });
 
     // ログウォッチャーを開始
@@ -134,7 +135,8 @@ program
       },
       emotions: config.tts.emotions,
       tempDir: config.tts.tempDir,
-      playCommand: config.tts.playCommand
+      playCommand: config.tts.playCommand,
+      maxTextLength: config.tts.maxTextLength
     });
     
     console.log('読み上げテスト中...');
