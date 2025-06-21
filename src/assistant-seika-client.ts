@@ -1,20 +1,20 @@
-import * as fs from 'fs';
-import * as path from 'path';
-import * as os from 'os';
-import * as https from 'https';
-import * as http from 'http';
-const player = require('play-sound')();
+import * as fs from "fs";
+import * as path from "path";
+import * as os from "os";
+import * as https from "https";
+import * as http from "http";
+const player = require("play-sound")();
 
 export interface AssistantSeikaConfig {
   host: string;
   port: number;
   username: string;
   password: string;
-  cid: number;  // Character ID (e.g., 60041 for 結月ゆかり)
+  cid: number; // Character ID (e.g., 60041 for 結月ゆかり)
   effects?: {
-    speed?: number;      // 0.5～2.0
-    volume?: number;     // 0.0～2.0
-    pitch?: number;      // 0.5～2.0
+    speed?: number; // 0.5～2.0
+    volume?: number; // 0.0～2.0
+    pitch?: number; // 0.5～2.0
     intonation?: number; // 0.0～2.0
   };
   emotions?: {
@@ -37,10 +37,10 @@ export class AssistantSeikaClient {
   constructor(private config: AssistantSeikaConfig) {
     // Basic認証のヘッダーを準備
     const credentials = `${config.username}:${config.password}`;
-    this.auth = Buffer.from(credentials).toString('base64');
-    
+    this.auth = Buffer.from(credentials).toString("base64");
+
     // 一時ファイル保存用ディレクトリ
-    this.tempDir = config.tempDir || path.join(os.tmpdir(), 'claude-yukari');
+    this.tempDir = config.tempDir || path.join(os.tmpdir(), "claude-yukari");
     if (!fs.existsSync(this.tempDir)) {
       fs.mkdirSync(this.tempDir, { recursive: true });
     }
@@ -50,24 +50,35 @@ export class AssistantSeikaClient {
     try {
       // 長い文章は分割して読み上げ
       const chunks = this.splitText(text);
-      
+
+      if (chunks.length > 1) {
+        console.log(
+          `\n📝 テキストを${chunks.length}個に分割しました（最大${this.config.maxTextLength || 100}文字）`,
+        );
+        chunks.forEach((chunk, index) => {
+          console.log(
+            `  [${index + 1}/${chunks.length}] ${chunk.substring(0, 50)}...（${chunk.length}文字）`,
+          );
+        });
+      }
+
       for (const chunk of chunks) {
         // 音声ファイルを生成
         const audioBuffer = await this.generateSpeech(chunk);
-        
+
         // 一時ファイルに保存
         const tempFile = path.join(this.tempDir, `speech_${Date.now()}.wav`);
         fs.writeFileSync(tempFile, audioBuffer);
-        
+
         // 音声を再生
         await this.playAudio(tempFile);
-        
+
         // 一時ファイルを削除
         fs.unlinkSync(tempFile);
-        
+
         // 次のチャンクまで少し間を空ける
         if (chunks.length > 1 && chunk !== chunks[chunks.length - 1]) {
-          await new Promise(resolve => setTimeout(resolve, 300));
+          await new Promise((resolve) => setTimeout(resolve, 300));
         }
       }
     } catch (error) {
@@ -76,74 +87,76 @@ export class AssistantSeikaClient {
   }
 
   private splitText(text: string): string[] {
-    const maxLength = this.config.maxTextLength || 200;
-    
+    const maxLength = this.config.maxTextLength || 100;
+
     // 短い文章はそのまま返す
-    if (text.length <= maxLength) {
+    if (text.length <= maxLength && !text.includes("。")) {
       return [text];
     }
-    
+
     const chunks: string[] = [];
-    let currentChunk = '';
-    
-    // 句読点で優先的に分割
-    const sentences = text.split(/(?<=[。！？\n])/);
-    
+
+    // まず句点で分割
+    const sentences = text.split(/(?<=[。！？])/);
+
     for (const sentence of sentences) {
-      if (currentChunk.length + sentence.length <= maxLength) {
-        currentChunk += sentence;
+      // 空文字列はスキップ
+      if (!sentence.trim()) continue;
+
+      // 一文が最大文字数以下ならそのまま追加
+      if (sentence.length <= maxLength) {
+        chunks.push(sentence.trim());
       } else {
-        if (currentChunk) {
-          chunks.push(currentChunk.trim());
-        }
-        
-        // 一文が長すぎる場合は、読点でさらに分割
-        if (sentence.length > maxLength) {
-          const subSentences = sentence.split(/(?<=[、,])/);
-          currentChunk = '';
-          
-          for (const subSentence of subSentences) {
-            if (currentChunk.length + subSentence.length <= maxLength) {
-              currentChunk += subSentence;
+        // 長すぎる場合は読点でさらに分割
+        const subSentences = sentence.split(/(?<=[、,])/);
+        let currentChunk = "";
+
+        for (const subSentence of subSentences) {
+          if (currentChunk.length + subSentence.length <= maxLength) {
+            currentChunk += subSentence;
+          } else {
+            if (currentChunk) {
+              chunks.push(currentChunk.trim());
+            }
+            
+            // それでも長すぎる場合は強制的に分割
+            if (subSentence.length > maxLength) {
+              const words = subSentence.match(new RegExp(`.{1,${maxLength}}`, 'g')) || [];
+              chunks.push(...words.map(w => w.trim()));
+              currentChunk = "";
             } else {
-              if (currentChunk) {
-                chunks.push(currentChunk.trim());
-              }
               currentChunk = subSentence;
             }
           }
-        } else {
-          currentChunk = sentence;
+        }
+        
+        if (currentChunk) {
+          chunks.push(currentChunk.trim());
         }
       }
     }
-    
-    // 最後のチャンクを追加
-    if (currentChunk) {
-      chunks.push(currentChunk.trim());
-    }
-    
-    return chunks;
+
+    return chunks.filter(chunk => chunk.length > 0);
   }
 
   async generateSpeech(text: string): Promise<Buffer> {
     const requestData = JSON.stringify({
       talktext: text,
       effects: this.config.effects,
-      emotions: this.config.emotions
+      emotions: this.config.emotions,
     });
 
     const options = {
       hostname: this.config.host,
       port: this.config.port,
       path: `/SAVE2/${this.config.cid}`,
-      method: 'POST',
+      method: "POST",
       headers: {
-        'Authorization': `Basic ${this.auth}`,
-        'Content-Type': 'application/json; charset=utf-8',
-        'Content-Length': Buffer.byteLength(requestData),
-        'Accept': 'audio/wav'
-      }
+        Authorization: `Basic ${this.auth}`,
+        "Content-Type": "application/json; charset=utf-8",
+        "Content-Length": Buffer.byteLength(requestData),
+        Accept: "audio/wav",
+      },
     };
 
     return new Promise((resolve, reject) => {
@@ -156,17 +169,17 @@ export class AssistantSeikaClient {
           return;
         }
 
-        res.on('data', (chunk) => {
+        res.on("data", (chunk) => {
           chunks.push(chunk);
         });
 
-        res.on('end', () => {
+        res.on("end", () => {
           const buffer = Buffer.concat(chunks);
           resolve(buffer);
         });
       });
 
-      req.on('error', (error) => {
+      req.on("error", (error) => {
         reject(error);
       });
 
@@ -178,10 +191,10 @@ export class AssistantSeikaClient {
   private playAudio(filePath: string): Promise<void> {
     return new Promise((resolve, reject) => {
       const playCommand = this.config.playCommand;
-      
+
       if (playCommand) {
         // カスタムコマンドを使用
-        const { exec } = require('child_process');
+        const { exec } = require("child_process");
         exec(`${playCommand} "${filePath}"`, (error: any) => {
           if (error) {
             reject(error);
@@ -206,17 +219,17 @@ export class AssistantSeikaClient {
     const options = {
       hostname: this.config.host,
       port: this.config.port,
-      path: '/AVATOR2',
-      method: 'GET',
+      path: "/AVATOR2",
+      method: "GET",
       headers: {
-        'Authorization': `Basic ${this.auth}`,
-        'Accept': 'application/json'
-      }
+        Authorization: `Basic ${this.auth}`,
+        Accept: "application/json",
+      },
     };
 
     return new Promise((resolve, reject) => {
       const client = this.config.port === 443 ? https : http;
-      let data = '';
+      let data = "";
 
       const req = client.request(options, (res) => {
         if (res.statusCode !== 200) {
@@ -224,11 +237,11 @@ export class AssistantSeikaClient {
           return;
         }
 
-        res.on('data', (chunk) => {
+        res.on("data", (chunk) => {
           data += chunk;
         });
 
-        res.on('end', () => {
+        res.on("end", () => {
           try {
             const avators = JSON.parse(data);
             resolve(avators);
@@ -238,7 +251,7 @@ export class AssistantSeikaClient {
         });
       });
 
-      req.on('error', (error) => {
+      req.on("error", (error) => {
         reject(error);
       });
 
@@ -250,16 +263,16 @@ export class AssistantSeikaClient {
     const options = {
       hostname: this.config.host,
       port: this.config.port,
-      path: '/VERSION',
-      method: 'GET',
+      path: "/VERSION",
+      method: "GET",
       headers: {
-        'Authorization': `Basic ${this.auth}`
-      }
+        Authorization: `Basic ${this.auth}`,
+      },
     };
 
     return new Promise((resolve, reject) => {
       const client = this.config.port === 443 ? https : http;
-      let data = '';
+      let data = "";
 
       const req = client.request(options, (res) => {
         if (res.statusCode !== 200) {
@@ -267,16 +280,16 @@ export class AssistantSeikaClient {
           return;
         }
 
-        res.on('data', (chunk) => {
+        res.on("data", (chunk) => {
           data += chunk;
         });
 
-        res.on('end', () => {
+        res.on("end", () => {
           resolve(data.trim());
         });
       });
 
-      req.on('error', (error) => {
+      req.on("error", (error) => {
         reject(error);
       });
 
@@ -284,3 +297,4 @@ export class AssistantSeikaClient {
     });
   }
 }
+
