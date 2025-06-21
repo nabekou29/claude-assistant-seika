@@ -30,9 +30,22 @@ export interface AvatorInfo {
   name: string;
 }
 
+interface QueueTask {
+  id: string;
+  text: string;
+  chunks?: string[];
+  currentChunkIndex: number;
+  priority: number;
+  dynamicSpeed?: number;
+}
+
 export class AssistantSeikaClient {
   private auth: string;
   private tempDir: string;
+  private speakQueue: QueueTask[] = [];
+  private currentTaskId?: string;
+  private isSpeaking = false;
+  private shouldSkipRemainingChunks = false;
 
   constructor(private config: AssistantSeikaConfig) {
     // Basic認証のヘッダーを準備
@@ -47,59 +60,164 @@ export class AssistantSeikaClient {
   }
 
   async speak(text: string): Promise<void> {
-    try {
-      // 長い文章は分割して読み上げ
-      const chunks = this.splitText(text);
+    return this.queueSpeak(text);
+  }
 
-      if (chunks.length > 1) {
-        console.log(
-          `\n📝 テキストを${chunks.length}個に分割しました（最大${this.config.maxTextLength || 100}文字）`,
-        );
-        chunks.forEach((chunk, index) => {
-          console.log(
-            `  [${index + 1}/${chunks.length}] ${chunk.substring(0, 50)}...（${chunk.length}文字）`,
-          );
-        });
-      }
-
-      for (const chunk of chunks) {
-        // 音声ファイルを生成
-        const audioBuffer = await this.generateSpeech(chunk);
-
-        // 一時ファイルに保存
-        const tempFile = path.join(this.tempDir, `speech_${Date.now()}.wav`);
-        fs.writeFileSync(tempFile, audioBuffer);
-
-        // 音声を再生
-        await this.playAudio(tempFile);
-
-        // 一時ファイルを削除
-        fs.unlinkSync(tempFile);
-
-        // 次のチャンクまで少し間を空ける
-        if (chunks.length > 1 && chunk !== chunks[chunks.length - 1]) {
-          await new Promise((resolve) => setTimeout(resolve, 300));
-        }
-      }
-    } catch (error) {
-      throw new Error(`Failed to speak: ${error}`);
+  private async queueSpeak(text: string): Promise<void> {
+    const taskId = `task_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    
+    // 新しいタスクが来たら、現在のタスクの残りのチャンクをスキップするフラグを立てる
+    if (this.currentTaskId && this.isSpeaking) {
+      this.shouldSkipRemainingChunks = true;
+      console.log('⏭️  現在の読み上げの残りをスキップします');
     }
+
+    // キューの長さと文字数から動的速度を計算
+    const dynamicSpeed = this.calculateDynamicSpeed(text, this.speakQueue.length);
+    
+    const task: QueueTask = {
+      id: taskId,
+      text,
+      currentChunkIndex: 0,
+      priority: 1,
+      dynamicSpeed
+    };
+
+    return new Promise((resolve, reject) => {
+      this.speakQueue.push(task);
+      
+      // 動的速度が設定されている場合は通知
+      if (dynamicSpeed && dynamicSpeed > 1.0) {
+        console.log(`⚡ 読み上げ速度を${dynamicSpeed.toFixed(1)}倍に調整`);
+      }
+      
+      // キューの処理を開始（既に処理中でなければ）
+      if (!this.isSpeaking) {
+        this.processQueue().then(resolve).catch(reject);
+      } else {
+        // 既に処理中の場合は、そのタスクの完了を待つ
+        const checkInterval = setInterval(() => {
+          const taskInQueue = this.speakQueue.find(t => t.id === taskId);
+          if (!taskInQueue && this.currentTaskId !== taskId) {
+            clearInterval(checkInterval);
+            resolve();
+          }
+        }, 100);
+      }
+    });
+  }
+
+  private calculateDynamicSpeed(text: string, queueLength: number): number | undefined {
+    const baseSpeed = this.config.effects?.speed || 1.0;
+    let speedMultiplier = 1.0;
+
+    // キューの長さに基づく速度調整
+    if (queueLength > 0) {
+      speedMultiplier = Math.min(1.5, 1.0 + (queueLength * 0.1));
+    }
+
+    // 文字数に基づく速度調整
+    const textLength = text.length;
+    if (textLength > 200) {
+      speedMultiplier = Math.max(speedMultiplier, 1.4);
+    } else if (textLength > 100) {
+      speedMultiplier = Math.max(speedMultiplier, 1.2);
+    }
+
+    // 基本速度と掛け合わせて、上限を2.0に制限
+    const finalSpeed = Math.min(2.0, baseSpeed * speedMultiplier);
+    
+    // 基本速度と変わらない場合はundefinedを返す
+    return finalSpeed !== baseSpeed ? finalSpeed : undefined;
+  }
+
+  private async processQueue(): Promise<void> {
+    while (this.speakQueue.length > 0) {
+      const task = this.speakQueue.shift()!;
+      this.currentTaskId = task.id;
+      this.isSpeaking = true;
+      this.shouldSkipRemainingChunks = false;
+
+      try {
+        // テキストを分割
+        if (!task.chunks) {
+          task.chunks = this.splitText(task.text);
+          
+          if (task.chunks.length > 1) {
+            console.log(
+              `\n📝 テキストを${task.chunks.length}個に分割しました（最大${this.config.maxTextLength || 100}文字）`,
+            );
+            task.chunks.forEach((chunk, index) => {
+              console.log(
+                `  [${index + 1}/${task.chunks!.length}] ${chunk.substring(0, 50)}...（${chunk.length}文字）`,
+              );
+            });
+          }
+        }
+
+        // チャンクを順次処理
+        for (let i = task.currentChunkIndex; i < task.chunks.length; i++) {
+          // 残りのチャンクをスキップするフラグが立っていて、まだ読み上げていないチャンクがある場合
+          if (this.shouldSkipRemainingChunks && i > task.currentChunkIndex) {
+            console.log(`⏭️  残り${task.chunks.length - i}個のチャンクをスキップ`);
+            break;
+          }
+
+          const chunk = task.chunks[i];
+          
+          // 動的速度を適用した音声ファイルを生成
+          const audioBuffer = await this.generateSpeech(chunk, task.dynamicSpeed);
+
+          // 一時ファイルに保存
+          const tempFile = path.join(this.tempDir, `speech_${Date.now()}.wav`);
+          fs.writeFileSync(tempFile, audioBuffer);
+
+          // 音声を再生
+          await this.playAudio(tempFile);
+
+          // 一時ファイルを削除
+          fs.unlinkSync(tempFile);
+
+          task.currentChunkIndex = i + 1;
+
+          // 次のチャンクまで少し間を空ける（最後のチャンクでない場合）
+          if (task.chunks.length > 1 && i < task.chunks.length - 1) {
+            await new Promise((resolve) => setTimeout(resolve, 200));
+          }
+        }
+      } catch (error) {
+        console.error(`タスク ${task.id} の処理中にエラー:`, error);
+      }
+
+      this.currentTaskId = undefined;
+    }
+
+    this.isSpeaking = false;
   }
 
   private splitText(text: string): string[] {
     const maxLength = this.config.maxTextLength || 100;
 
-    // 短い文章はそのまま返す
-    if (text.length <= maxLength && !text.includes("。")) {
+    // 文字数が上限以下ならそのまま返す
+    if (text.length <= maxLength) {
       return [text];
     }
 
     const chunks: string[] = [];
 
-    // まず句点で分割
-    const sentences = text.split(/(?<=[。！？])/);
+    // 上限を超える場合は改行や句点で分割を試みる
+    // まず改行で分割し、その後各行を句点で分割
+    const lines = text.split(/\n/);
+    const allSentences: string[] = [];
+    
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      // 各行を句点で分割
+      const sentences = line.split(/(?<=[。！？])/);
+      allSentences.push(...sentences);
+    }
 
-    for (const sentence of sentences) {
+    for (const sentence of allSentences) {
       // 空文字列はスキップ
       if (!sentence.trim()) continue;
 
@@ -140,10 +258,16 @@ export class AssistantSeikaClient {
     return chunks.filter((chunk) => chunk.length > 0);
   }
 
-  async generateSpeech(text: string): Promise<Buffer> {
+  async generateSpeech(text: string, dynamicSpeed?: number): Promise<Buffer> {
+    // 動的速度が指定されている場合は、エフェクトの速度を上書き
+    const effects = dynamicSpeed ? {
+      ...this.config.effects,
+      speed: dynamicSpeed
+    } : this.config.effects;
+    
     const requestData = JSON.stringify({
       talktext: text,
-      effects: this.config.effects,
+      effects: effects,
       emotions: this.config.emotions,
     });
 
