@@ -118,25 +118,26 @@ export class AssistantSeikaClient {
             if (currentChunk) {
               chunks.push(currentChunk.trim());
             }
-            
+
             // それでも長すぎる場合は強制的に分割
             if (subSentence.length > maxLength) {
-              const words = subSentence.match(new RegExp(`.{1,${maxLength}}`, 'g')) || [];
-              chunks.push(...words.map(w => w.trim()));
+              const words =
+                subSentence.match(new RegExp(`.{1,${maxLength}}`, "g")) || [];
+              chunks.push(...words.map((w) => w.trim()));
               currentChunk = "";
             } else {
               currentChunk = subSentence;
             }
           }
         }
-        
+
         if (currentChunk) {
           chunks.push(currentChunk.trim());
         }
       }
     }
 
-    return chunks.filter(chunk => chunk.length > 0);
+    return chunks.filter((chunk) => chunk.length > 0);
   }
 
   async generateSpeech(text: string): Promise<Buffer> {
@@ -165,7 +166,13 @@ export class AssistantSeikaClient {
 
       const req = client.request(options, (res) => {
         if (res.statusCode !== 200) {
-          reject(new Error(`HTTP ${res.statusCode}: ${res.statusMessage}`));
+          let errorData = '';
+          res.on('data', (chunk) => {
+            errorData += chunk;
+          });
+          res.on('end', () => {
+            reject(new Error(`HTTP ${res.statusCode}: ${res.statusMessage} - ${errorData}`));
+          });
           return;
         }
 
@@ -180,7 +187,7 @@ export class AssistantSeikaClient {
       });
 
       req.on("error", (error) => {
-        reject(error);
+        reject(new Error(`HTTP Request failed: ${error.message}`));
       });
 
       req.write(requestData);
@@ -233,7 +240,13 @@ export class AssistantSeikaClient {
 
       const req = client.request(options, (res) => {
         if (res.statusCode !== 200) {
-          reject(new Error(`HTTP ${res.statusCode}: ${res.statusMessage}`));
+          let errorData = '';
+          res.on('data', (chunk) => {
+            errorData += chunk;
+          });
+          res.on('end', () => {
+            reject(new Error(`HTTP ${res.statusCode}: ${res.statusMessage} - ${errorData}`));
+          });
           return;
         }
 
@@ -252,7 +265,7 @@ export class AssistantSeikaClient {
       });
 
       req.on("error", (error) => {
-        reject(error);
+        reject(new Error(`HTTP Request failed: ${error.message}`));
       });
 
       req.end();
@@ -276,7 +289,13 @@ export class AssistantSeikaClient {
 
       const req = client.request(options, (res) => {
         if (res.statusCode !== 200) {
-          reject(new Error(`HTTP ${res.statusCode}: ${res.statusMessage}`));
+          let errorData = '';
+          res.on('data', (chunk) => {
+            errorData += chunk;
+          });
+          res.on('end', () => {
+            reject(new Error(`HTTP ${res.statusCode}: ${res.statusMessage} - ${errorData}`));
+          });
           return;
         }
 
@@ -290,11 +309,10 @@ export class AssistantSeikaClient {
       });
 
       req.on("error", (error) => {
-        reject(error);
+        reject(new Error(`HTTP Request failed: ${error.message}`));
       });
 
       req.end();
     });
   }
 }
-

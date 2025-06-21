@@ -99,8 +99,14 @@ program
       
       try {
         await ttsClient.speak(text);
-      } catch (error) {
-        console.error('読み上げエラー:', error);
+      } catch (error: any) {
+        console.error('読み上げエラー:', error.message || error);
+        if (error.cause) {
+          console.error('原因:', error.cause);
+        }
+        if (error.errors) {
+          console.error('詳細エラー:', error.errors);
+        }
       }
     });
 
@@ -147,8 +153,14 @@ program
     try {
       await ttsClient.speak(text);
       console.log('読み上げ成功！');
-    } catch (error) {
-      console.error('読み上げ失敗:', error);
+    } catch (error: any) {
+      console.error('読み上げ失敗:', error.message || error);
+      if (error.cause) {
+        console.error('原因:', error.cause);
+      }
+      if (error.errors) {
+        console.error('詳細エラー:', error.errors);
+      }
       process.exit(1);
     }
   });
