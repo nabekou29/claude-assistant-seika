@@ -22,6 +22,16 @@ program
   .action(async (options) => {
     const config = loadConfig();
     
+    // 初回実行時のヘルプ
+    if (!fs.existsSync('.env') && !fs.existsSync(path.join(os.homedir(), '.config', 'claude-yukari', 'config.json'))) {
+      console.log('📝 設定ファイルが見つかりません。デフォルト設定で実行します。');
+      console.log('');
+      console.log('カスタマイズする場合は以下のいずれかを作成してください：');
+      console.log('1. .env ファイル（cp .env.example .env）');
+      console.log('2. ~/.config/claude-yukari/config.json');
+      console.log('');
+    }
+    
     // オプションで設定を上書き
     if (options.sessionId) {
       config.sessionId = options.sessionId;
@@ -171,6 +181,54 @@ program
   .action(() => {
     const config = loadConfig();
     console.log(JSON.stringify(config, null, 2));
+  });
+
+program
+  .command('init')
+  .description('設定ファイルを作成')
+  .action(() => {
+    const envExamplePath = path.join(__dirname, '..', '.env.example');
+    const envPath = '.env';
+    
+    if (fs.existsSync(envPath)) {
+      console.log('⚠️  .env ファイルは既に存在します。');
+      return;
+    }
+    
+    try {
+      // .env.example が存在する場合はコピー
+      if (fs.existsSync(envExamplePath)) {
+        fs.copyFileSync(envExamplePath, envPath);
+      } else {
+        // 存在しない場合は基本的な内容を作成
+        const defaultEnv = `# AssistantSeika設定
+SEIKA_HOST=localhost
+SEIKA_PORT=7180
+SEIKA_USERNAME=SeikaServerUser
+SEIKA_PASSWORD=SeikaServerPassword
+SEIKA_CID=60041  # 結月ゆかり
+
+# エフェクト設定
+SEIKA_SPEED=1.0      # 話速 (0.5～2.0)
+SEIKA_PITCH=1.0      # 高さ (0.5～2.0)
+SEIKA_VOLUME=1.0     # 音量 (0.0～2.0)
+SEIKA_INTONATION=1.0 # 抑揚 (0.0～2.0)
+
+# その他の設定
+# SEIKA_MAX_TEXT_LENGTH=100  # 一度に読み上げる最大文字数（デフォルト: 100）
+`;
+        fs.writeFileSync(envPath, defaultEnv);
+      }
+      
+      console.log('✅ .env ファイルを作成しました。');
+      console.log('');
+      console.log('次のステップ:');
+      console.log('1. .env ファイルを編集して、AssistantSeikaの接続情報を設定');
+      console.log('2. claude-yukari test "テスト" で接続確認');
+      console.log('3. claude-yukari watch でClaude Codeの監視を開始');
+    } catch (error) {
+      console.error('❌ ファイルの作成に失敗しました:', error);
+    }
   });
 
 program

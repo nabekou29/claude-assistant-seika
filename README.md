@@ -10,6 +10,22 @@ npm run build
 npm link  # グローバルにインストール
 ```
 
+## クイックスタート
+
+```bash
+# 1. 設定ファイルを作成
+claude-yukari init
+
+# 2. .envファイルを編集（必要に応じて）
+# デフォルト設定でも動作します
+
+# 3. 接続テスト
+claude-yukari test "こんにちは"
+
+# 4. Claude Codeの監視を開始
+claude-yukari watch
+```
+
 ## 設定
 
 ### 環境変数
