@@ -53,6 +53,31 @@ cp .env.example .env
 - `./.claude-yukari.json`（プロジェクトルート）
 - `~/.config/claude-yukari/config.json`（ユーザーホーム）
 
+または、コマンド実行時に任意のJSONファイルを指定：
+```bash
+# カスタム設定ファイルを使用
+claude-yukari watch --config my-config.json
+claude-yukari test "テスト" --config ~/configs/yukari.json
+```
+
+設定ファイルの例（config.example.json）：
+```json
+{
+  "tts": {
+    "host": "localhost",
+    "port": 7180,
+    "username": "SeikaServerUser",
+    "password": "SeikaServerPassword",
+    "cid": 60041,
+    "speed": 1.0,
+    "pitch": 1.0,
+    "volume": 1.0,
+    "intonation": 1.0,
+    "maxTextLength": 100
+  }
+}
+```
+
 ## 使い方
 
 ### 会話ログの監視を開始
@@ -66,12 +91,24 @@ claude-yukari watch --session-id <SESSION_ID>
 
 # プロジェクトディレクトリを指定
 claude-yukari watch --project-dir /path/to/project
+
+# 設定ファイルを使わずにパラメータで全て指定
+claude-yukari watch --no-config --host 192.168.1.100 --username user --password pass
+
+# エフェクトを調整して監視
+claude-yukari watch --speed 1.3 --pitch 1.1 --intonation 1.5
 ```
 
 ### 読み上げテスト
 
 ```bash
 claude-yukari test "こんにちは、ゆかりです"
+
+# パラメータで設定を指定
+claude-yukari test "テスト" --host 192.168.1.100 --port 7180
+
+# 話速や高さを調整
+claude-yukari test "ゆっくり話します" --speed 0.8 --pitch 1.2
 ```
 
 ### 設定の確認

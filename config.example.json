@@ -1,0 +1,21 @@
+{
+  "tts": {
+    "host": "localhost",
+    "port": 7180,
+    "username": "SeikaServerUser",
+    "password": "SeikaServerPassword",
+    "cid": 60041,
+    "speed": 1.0,
+    "pitch": 1.0,
+    "volume": 1.0,
+    "intonation": 1.0,
+    "maxTextLength": 100,
+    "emotions": {
+      "喜び": 0.0,
+      "怒り": 0.0,
+      "悲しみ": 0.0
+    }
+  },
+  "sessionId": null,
+  "projectDir": null
+}

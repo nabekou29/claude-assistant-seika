@@ -19,11 +19,63 @@ program
   .description('会話ログを監視して自動読み上げを開始')
   .option('-s, --session-id <id>', 'セッションID')
   .option('-p, --project-dir <dir>', 'プロジェクトディレクトリ', process.cwd())
+  // AssistantSeika設定
+  .option('--host <host>', 'AssistantSeikaのホスト')
+  .option('--port <port>', 'AssistantSeikaのポート', parseInt)
+  .option('--username <username>', 'AssistantSeikaのユーザー名')
+  .option('--password <password>', 'AssistantSeikaのパスワード')
+  .option('--cid <cid>', '話者ID (60041: 結月ゆかり)', parseInt)
+  // エフェクト設定
+  .option('--speed <speed>', '話速 (0.5～2.0)', parseFloat)
+  .option('--pitch <pitch>', '高さ (0.5～2.0)', parseFloat)
+  .option('--volume <volume>', '音量 (0.0～2.0)', parseFloat)
+  .option('--intonation <intonation>', '抑揚 (0.0～2.0)', parseFloat)
+  // その他
+  .option('--max-text-length <length>', '最大文字数', parseInt)
+  .option('--config <path>', '設定ファイルのパス')
+  .option('--no-config', '設定ファイルを無視してデフォルト設定を使用')
   .action(async (options) => {
-    const config = loadConfig();
+    let config = loadConfig();
     
-    // 初回実行時のヘルプ
-    if (!fs.existsSync('.env') && !fs.existsSync(path.join(os.homedir(), '.config', 'claude-yukari', 'config.json'))) {
+    // カスタム設定ファイルの読み込み
+    if (options.config && fs.existsSync(options.config)) {
+      try {
+        const customConfig = JSON.parse(fs.readFileSync(options.config, 'utf-8'));
+        config = {
+          ...config,
+          tts: {
+            ...config.tts,
+            ...customConfig.tts
+          },
+          sessionId: customConfig.sessionId || config.sessionId,
+          projectDir: customConfig.projectDir || config.projectDir
+        };
+      } catch (error) {
+        console.error('設定ファイルの読み込みに失敗しました:', error);
+        process.exit(1);
+      }
+    }
+    
+    // --no-configオプションの場合はデフォルト設定を使用
+    if (options.config === false) {
+      config = {
+        tts: {
+          host: 'localhost',
+          port: 7180,
+          username: 'SeikaServerUser', 
+          password: 'SeikaServerPassword',
+          cid: 60041,
+          speed: 1.0,
+          pitch: 1.0,
+          volume: 1.0,
+          intonation: 1.0
+        },
+        projectDir: process.cwd()
+      };
+    }
+    
+    // 初回実行時のヘルプ（--no-configでない場合のみ）
+    if (options.config !== false && !fs.existsSync('.env') && !fs.existsSync(path.join(os.homedir(), '.config', 'claude-yukari', 'config.json'))) {
       console.log('📝 設定ファイルが見つかりません。デフォルト設定で実行します。');
       console.log('');
       console.log('カスタマイズする場合は以下のいずれかを作成してください：');
@@ -32,13 +84,19 @@ program
       console.log('');
     }
     
-    // オプションで設定を上書き
-    if (options.sessionId) {
-      config.sessionId = options.sessionId;
-    }
-    if (options.projectDir) {
-      config.projectDir = options.projectDir;
-    }
+    // コマンドラインオプションで設定を上書き
+    if (options.sessionId) config.sessionId = options.sessionId;
+    if (options.projectDir) config.projectDir = options.projectDir;
+    if (options.host) config.tts.host = options.host;
+    if (options.port) config.tts.port = options.port;
+    if (options.username) config.tts.username = options.username;
+    if (options.password) config.tts.password = options.password;
+    if (options.cid !== undefined) config.tts.cid = options.cid;
+    if (options.speed !== undefined) config.tts.speed = options.speed;
+    if (options.pitch !== undefined) config.tts.pitch = options.pitch;
+    if (options.volume !== undefined) config.tts.volume = options.volume;
+    if (options.intonation !== undefined) config.tts.intonation = options.intonation;
+    if (options.maxTextLength !== undefined) config.tts.maxTextLength = options.maxTextLength;
 
     // プロジェクトディレクトリからログファイルパスを構築
     const projectDirEncoded = config.projectDir!.replace(/[/_.]/g, '-');
@@ -135,8 +193,69 @@ program
   .command('test')
   .description('テキストを読み上げてAPIの動作確認')
   .argument('<text>', '読み上げるテキスト')
-  .action(async (text) => {
-    const config = loadConfig();
+  // AssistantSeika設定
+  .option('--host <host>', 'AssistantSeikaのホスト')
+  .option('--port <port>', 'AssistantSeikaのポート', parseInt)
+  .option('--username <username>', 'AssistantSeikaのユーザー名')
+  .option('--password <password>', 'AssistantSeikaのパスワード')
+  .option('--cid <cid>', '話者ID (60041: 結月ゆかり)', parseInt)
+  // エフェクト設定
+  .option('--speed <speed>', '話速 (0.5～2.0)', parseFloat)
+  .option('--pitch <pitch>', '高さ (0.5～2.0)', parseFloat)
+  .option('--volume <volume>', '音量 (0.0～2.0)', parseFloat)
+  .option('--intonation <intonation>', '抑揚 (0.0～2.0)', parseFloat)
+  // その他
+  .option('--max-text-length <length>', '最大文字数', parseInt)
+  .option('--config <path>', '設定ファイルのパス')
+  .option('--no-config', '設定ファイルを無視してデフォルト設定を使用')
+  .action(async (text, options) => {
+    let config = loadConfig();
+    
+    // カスタム設定ファイルの読み込み
+    if (options.config && fs.existsSync(options.config)) {
+      try {
+        const customConfig = JSON.parse(fs.readFileSync(options.config, 'utf-8'));
+        config = {
+          ...config,
+          tts: {
+            ...config.tts,
+            ...customConfig.tts
+          }
+        };
+      } catch (error) {
+        console.error('設定ファイルの読み込みに失敗しました:', error);
+        process.exit(1);
+      }
+    }
+    
+    // --no-configオプションの場合はデフォルト設定を使用
+    if (options.config === false) {
+      config = {
+        tts: {
+          host: 'localhost',
+          port: 7180,
+          username: 'SeikaServerUser', 
+          password: 'SeikaServerPassword',
+          cid: 60041,
+          speed: 1.0,
+          pitch: 1.0,
+          volume: 1.0,
+          intonation: 1.0
+        }
+      };
+    }
+    
+    // コマンドラインオプションで設定を上書き
+    if (options.host) config.tts.host = options.host;
+    if (options.port) config.tts.port = options.port;
+    if (options.username) config.tts.username = options.username;
+    if (options.password) config.tts.password = options.password;
+    if (options.cid !== undefined) config.tts.cid = options.cid;
+    if (options.speed !== undefined) config.tts.speed = options.speed;
+    if (options.pitch !== undefined) config.tts.pitch = options.pitch;
+    if (options.volume !== undefined) config.tts.volume = options.volume;
+    if (options.intonation !== undefined) config.tts.intonation = options.intonation;
+    if (options.maxTextLength !== undefined) config.tts.maxTextLength = options.maxTextLength;
     const ttsClient = new AssistantSeikaClient({
       host: config.tts.host!,
       port: config.tts.port!,
