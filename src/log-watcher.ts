@@ -92,10 +92,43 @@ export class LogWatcher extends EventEmitter {
       
       for (const content of entry.message.content) {
         if (content.type === 'text' && content.text) {
-          this.emit('assistantMessage', content.text);
+          // コードブロックを除外したテキストを生成
+          const textWithoutCode = this.removeCodeBlocks(content.text);
+          
+          // コードブロックを除外した結果が空でない場合のみ発行
+          if (textWithoutCode.trim()) {
+            this.emit('assistantMessage', textWithoutCode);
+          }
         }
       }
     }
+  }
+
+  private removeCodeBlocks(text: string): string {
+    // コードブロックの前後に説明がある場合の処理を考慮
+    let processedText = text;
+    
+    // フェンスドコードブロック（```）を処理
+    // コードブロックの前に「以下のようなコード」的な文言がある場合も考慮
+    processedText = processedText.replace(
+      /((?:以下の|次の|こんな|このような)?(?:コード|実装|例)?[:：]?\s*\n)?```[\s\S]*?```/g, 
+      (_match, prefix) => {
+        // 前置きがある場合は「コードブロックです」的な置換
+        if (prefix && prefix.trim()) {
+          return 'コードブロックがあります。';
+        }
+        // 前置きがない場合は改行のみ
+        return '\n';
+      }
+    );
+    
+    // インラインコードは読み上げるのでそのまま残す
+    
+    // 連続する改行を2つまでに制限
+    processedText = processedText.replace(/\n{3,}/g, '\n\n');
+    
+    // 最初と最後の空白を削除
+    return processedText.trim();
   }
 
   stop(): void {
