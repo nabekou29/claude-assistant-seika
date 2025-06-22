@@ -65,12 +65,6 @@ export class AssistantSeikaClient {
 
   private async queueSpeak(text: string): Promise<void> {
     const taskId = `task_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-    
-    // 新しいタスクが来たら、現在のタスクの残りのチャンクをスキップするフラグを立てる
-    if (this.currentTaskId && this.isSpeaking) {
-      this.shouldSkipRemainingChunks = true;
-      console.log('⏭️  現在の読み上げの残りをスキップします');
-    }
 
     // キューの長さと文字数から動的速度を計算
     const dynamicSpeed = this.calculateDynamicSpeed(text, this.speakQueue.length);
@@ -157,8 +151,8 @@ export class AssistantSeikaClient {
 
         // チャンクを順次処理
         for (let i = task.currentChunkIndex; i < task.chunks.length; i++) {
-          // 残りのチャンクをスキップするフラグが立っていて、まだ読み上げていないチャンクがある場合
-          if (this.shouldSkipRemainingChunks && i > task.currentChunkIndex) {
+          // スキップフラグが立っている場合は即座に中断
+          if (this.shouldSkipRemainingChunks) {
             console.log(`⏭️  残り${task.chunks.length - i}個のチャンクをスキップ`);
             break;
           }
@@ -168,20 +162,41 @@ export class AssistantSeikaClient {
           // 動的速度を適用した音声ファイルを生成
           const audioBuffer = await this.generateSpeech(chunk, task.dynamicSpeed);
 
+          // 最初のチャンクの音声生成が完了したら、キューに他のタスクがある場合はスキップフラグを立てる
+          if (i === 0 && this.speakQueue.length > 0) {
+            this.shouldSkipRemainingChunks = true;
+            console.log('⏭️  新しいメッセージの準備ができたため、現在の読み上げの残りをスキップします');
+          }
+
+          // スキップフラグを再度チェック（音声生成中に新しいタスクが来た場合）
+          if (this.shouldSkipRemainingChunks) {
+            // 現在のチャンクは最後まで再生するため、次のチャンクからスキップ
+            if (i < task.chunks.length - 1) {
+              console.log(`⏭️  次のチャンクからスキップ（残り${task.chunks.length - i - 1}個）`);
+            }
+          }
+
           // 一時ファイルに保存
           const tempFile = path.join(this.tempDir, `speech_${Date.now()}.wav`);
           fs.writeFileSync(tempFile, audioBuffer);
 
           // 音声を再生
-          await this.playAudio(tempFile);
-
-          // 一時ファイルを削除
-          fs.unlinkSync(tempFile);
+          try {
+            await this.playAudio(tempFile);
+          } catch (error) {
+            // 再生エラーは無視（スキップされた可能性がある）
+            console.log('⚠️  音声再生がスキップまたはエラー:', error);
+          } finally {
+            // 一時ファイルを削除
+            if (fs.existsSync(tempFile)) {
+              fs.unlinkSync(tempFile);
+            }
+          }
 
           task.currentChunkIndex = i + 1;
 
           // 次のチャンクまで少し間を空ける（最後のチャンクでない場合）
-          if (task.chunks.length > 1 && i < task.chunks.length - 1) {
+          if (task.chunks.length > 1 && i < task.chunks.length - 1 && !this.shouldSkipRemainingChunks) {
             await new Promise((resolve) => setTimeout(resolve, 200));
           }
         }
@@ -204,58 +219,100 @@ export class AssistantSeikaClient {
     }
 
     const chunks: string[] = [];
+    let currentChunk = "";
 
-    // 上限を超える場合は改行や句点で分割を試みる
-    // まず改行で分割し、その後各行を句点で分割
-    const lines = text.split(/\n/);
-    const allSentences: string[] = [];
+    // まず改行で分割（段落単位）
+    const paragraphs = text.split(/\n+/);
     
-    for (const line of lines) {
-      if (!line.trim()) continue;
-      // 各行を句点で分割
-      const sentences = line.split(/(?<=[。！？])/);
-      allSentences.push(...sentences);
-    }
+    for (let i = 0; i < paragraphs.length; i++) {
+      const paragraph = paragraphs[i].trim();
+      if (!paragraph) continue;
 
-    for (const sentence of allSentences) {
-      // 空文字列はスキップ
-      if (!sentence.trim()) continue;
+      // 現在のチャンクに段落を追加できるか確認
+      const potentialChunk = currentChunk 
+        ? currentChunk + "\n" + paragraph 
+        : paragraph;
 
-      // 一文が最大文字数以下ならそのまま追加
-      if (sentence.length <= maxLength) {
-        chunks.push(sentence.trim());
+      if (potentialChunk.length <= maxLength) {
+        // 追加してもmaxLength以下なら現在のチャンクに追加
+        currentChunk = potentialChunk;
       } else {
-        // 長すぎる場合は読点でさらに分割
-        const subSentences = sentence.split(/(?<=[、,])/);
-        let currentChunk = "";
-
-        for (const subSentence of subSentences) {
-          if (currentChunk.length + subSentence.length <= maxLength) {
-            currentChunk += subSentence;
-          } else {
-            if (currentChunk) {
-              chunks.push(currentChunk.trim());
-            }
-
-            // それでも長すぎる場合は強制的に分割
-            if (subSentence.length > maxLength) {
-              const words =
-                subSentence.match(new RegExp(`.{1,${maxLength}}`, "g")) || [];
-              chunks.push(...words.map((w) => w.trim()));
-              currentChunk = "";
-            } else {
-              currentChunk = subSentence;
-            }
-          }
+        // 現在のチャンクを保存して新しいチャンクを開始
+        if (currentChunk) {
+          chunks.push(currentChunk);
+          currentChunk = "";
         }
 
-        if (currentChunk) {
-          chunks.push(currentChunk.trim());
+        // 段落自体がmaxLengthを超える場合は句点で分割
+        if (paragraph.length > maxLength) {
+          const sentences = paragraph.split(/(?<=[。！？])/);
+          
+          for (const sentence of sentences) {
+            const trimmedSentence = sentence.trim();
+            if (!trimmedSentence) continue;
+
+            // 文がまだ長すぎる場合
+            if (trimmedSentence.length > maxLength) {
+              // 現在のチャンクがあれば保存
+              if (currentChunk) {
+                chunks.push(currentChunk);
+                currentChunk = "";
+              }
+
+              // 読点で分割を試みる
+              const phrases = trimmedSentence.split(/(?<=[、,])/);
+              let tempChunk = "";
+
+              for (const phrase of phrases) {
+                if (tempChunk.length + phrase.length <= maxLength) {
+                  tempChunk += phrase;
+                } else {
+                  if (tempChunk) {
+                    chunks.push(tempChunk.trim());
+                  }
+                  
+                  // それでも長い場合は強制分割
+                  if (phrase.length > maxLength) {
+                    const forcedSplits = phrase.match(new RegExp(`.{1,${maxLength}}`, "g")) || [];
+                    chunks.push(...forcedSplits.map(s => s.trim()));
+                    tempChunk = "";
+                  } else {
+                    tempChunk = phrase;
+                  }
+                }
+              }
+
+              if (tempChunk) {
+                currentChunk = tempChunk.trim();
+              }
+            } else {
+              // 文を現在のチャンクに追加できるか確認
+              const potentialWithSentence = currentChunk 
+                ? currentChunk + trimmedSentence 
+                : trimmedSentence;
+
+              if (potentialWithSentence.length <= maxLength) {
+                currentChunk = potentialWithSentence;
+              } else {
+                if (currentChunk) {
+                  chunks.push(currentChunk);
+                }
+                currentChunk = trimmedSentence;
+              }
+            }
+          }
+        } else {
+          currentChunk = paragraph;
         }
       }
     }
 
-    return chunks.filter((chunk) => chunk.length > 0);
+    // 最後のチャンクを追加
+    if (currentChunk) {
+      chunks.push(currentChunk);
+    }
+
+    return chunks.filter(chunk => chunk.length > 0);
   }
 
   async generateSpeech(text: string, dynamicSpeed?: number): Promise<Buffer> {
